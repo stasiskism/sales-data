@@ -18,40 +18,55 @@ def database_connection():
     
 def create_tables(conn):
     cursor = conn.cursor()
-    drop_products_table = "DROP TABLE IF EXISTS products CASCADE;"
-    drop_stores_table = "DROP TABLE IF EXISTS stores CASCADE;"
-    drop_time_table = "DROP TABLE IF EXISTS time CASCADE;"
-    drop_sales_transactions_table = "DROP TABLE IF EXISTS sales_transactions CASCADE;"
 
-    create_products_table = """
+    # Drop existing tables
+    cursor.execute("DROP TABLE IF EXISTS products CASCADE;")
+    cursor.execute("DROP TABLE IF EXISTS stores CASCADE;")
+    cursor.execute("DROP TABLE IF EXISTS time CASCADE;")
+    cursor.execute("DROP TABLE IF EXISTS sales_transactions CASCADE;")
+    cursor.execute("DROP TABLE IF EXISTS FactSalesTransactions CASCADE;")
+    cursor.execute("DROP TABLE IF EXISTS FactSalesByProduct CASCADE;")
+    cursor.execute("DROP TABLE IF EXISTS FactSalesByStore CASCADE;")
+    cursor.execute("DROP TABLE IF EXISTS FactSalesByDate CASCADE;")
+    cursor.execute("DROP TABLE IF EXISTS FactSalesByMonth CASCADE;")
+    cursor.execute("DROP TABLE IF EXISTS FactSalesByYear CASCADE;")
+    cursor.execute("DROP TABLE IF EXISTS FactSalesByCategory CASCADE;")
+    cursor.execute("DROP TABLE IF EXISTS FactSalesByDayOfWeek CASCADE;")
+    
+    # Create tables
+    cursor.execute("""
     CREATE TABLE products (
         product_id SERIAL PRIMARY KEY,
-        product_name VARCHAR(255),
+        product_name VARCHAR(255) UNIQUE,
         category VARCHAR(100),
         price DECIMAL
     );
     """
+    )
     
-    create_stores_table = """
+    cursor.execute("""
     CREATE TABLE stores (
         store_id SERIAL PRIMARY KEY,
-        store_name VARCHAR(255),
+        store_name VARCHAR(255) UNIQUE,
         location VARCHAR(255),
         city VARCHAR(100),
         state VARCHAR(100)
     );
     """
+    )
 
-    create_time_table = """
+    cursor.execute("""
     CREATE TABLE time (
         date_id SERIAL PRIMARY KEY,
+        sale_date DATE UNIQUE,
         day INT,
         month INT,
         year INT
     );
     """
+    )
 
-    create_sales_transactions_table = """
+    cursor.execute("""
     CREATE TABLE sales_transactions (
         transaction_id SERIAL PRIMARY KEY,
         product_id INT REFERENCES products(product_id),
@@ -61,112 +76,169 @@ def create_tables(conn):
         revenue DECIMAL
     );
     """
+    )
 
-    cursor.execute(drop_products_table)
-    cursor.execute(drop_stores_table)
-    cursor.execute(drop_time_table)
-    cursor.execute(drop_sales_transactions_table)
-    cursor.execute(create_products_table)
-    cursor.execute(create_stores_table)
-    cursor.execute(create_time_table)
-    cursor.execute(create_sales_transactions_table)
-    print("Tables replaced successfully!")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS FactSalesTransactions (
+            transaction_id SERIAL PRIMARY KEY,
+            product_id INT REFERENCES products(product_id),
+            store_id INT REFERENCES stores(store_id),
+            quantity_sold INT,
+            sale_date DATE,
+            total_revenue DECIMAL
+        );
+    """)
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS FactSalesByProduct (
+            product_id INT REFERENCES products(product_id),
+            total_quantity_sold INT,
+            total_revenue DECIMAL,
+            report_date DATE,
+            PRIMARY KEY (product_id, report_date)
+        );
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS FactSalesByStore (
+            store_name varchar(200) REFERENCES stores(store_name),
+            total_quantity_sold INT,
+            total_revenue DECIMAL,
+            report_date DATE,
+            PRIMARY KEY (store_name, report_date)
+        );
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS FactSalesByDate (
+            sale_date DATE PRIMARY KEY,
+            total_quantity_sold INT,
+            total_revenue DECIMAL
+        );
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS FactSalesByMonth (
+            month VARCHAR(7) PRIMARY KEY,
+            total_quantity_sold INT,
+            total_revenue DECIMAL
+        );
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS FactSalesByYear (
+            year INT PRIMARY KEY,
+            total_quantity_sold INT,
+            total_revenue DECIMAL
+        );
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS FactSalesByCategory (
+            category VARCHAR(100) PRIMARY KEY,
+            total_quantity_sold INT,
+            total_revenue DECIMAL
+        );
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS FactSalesByDayOfWeek (
+            day_of_week VARCHAR(10) PRIMARY KEY,
+            total_quantity_sold INT,
+            total_revenue DECIMAL
+        );
+    """)
+
+    print("Tables created successfully!")
     cursor.close()
-
-def read_and_clean_data():
-    sales_data = pd.read_csv('sales_data.csv')
-
-    sales_data.dropna(inplace=True)
-    
-    sales_data.drop_duplicates(inplace=True)
-
-    sales_data['sale_date'] = pd.to_datetime(sales_data['sale_date'], format='%d/%m/%Y', errors='coerce')
-    
-    sales_data['day'] = sales_data['sale_date'].dt.day
-    sales_data['month'] = sales_data['sale_date'].dt.month
-    sales_data['year'] = sales_data['sale_date'].dt.year
-    
-    return sales_data
 
 def insert_dim_data(data, conn):
     cursor = conn.cursor()
-    products_query = """INSERT INTO products (product_name, category, price) VALUES (%s, %s, %s)"""
-    stores_query = """INSERT INTO stores (store_name, location, city) VALUES (%s, %s, %s)"""
-    time_query = """INSERT INTO time (day, month, year) VALUES (%s, %s, %s)"""
+    products_query = """
+            INSERT INTO products (product_name, category, price)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (product_name) 
+            DO NOTHING;
+        """
+    stores_query = """
+            INSERT INTO stores (store_name, location, city)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (store_name) 
+            DO NOTHING;
+        """
+    time_query = """INSERT INTO time (sale_date, day, month, year) VALUES (%s, %s, %s, %s) ON CONFLICT (sale_date) DO NOTHING;"""
 
-    for index, row in data.iterrows():
+    for _, row in data.iterrows():
         
         cursor.execute(products_query, (row['product_name'], row['category'], row['price']))
         cursor.execute(stores_query, (row['store_name'], row['location'], row['city']))
-        cursor.execute(time_query, (row['day'], row['month'], row['year']))
+        cursor.execute(time_query, (row['sale_date'].date(), row['day'], row['month'], row['year']))
     conn.commit()
     cursor.close()
 
-def data_aggregation(data):
 
-    # Calculate total revenue for each transaction
-    data['total_revenue'] = data['quantity_sold'] * data['price']
-    total_revenue = data['total_revenue'].sum()
+def insert_fact_data(sales_by_product, sales_by_store, sales_by_day, sales_by_month, sales_by_year, sales_by_category, sales_by_day_of_week, conn):
+    cursor = conn.cursor()
+
+    # Insert into FactSalesTransactions
+    for index, row in sales_by_day.iterrows():
+        cursor.execute("""
+            INSERT INTO FactSalesTransactions (store_id, product_id, quantity_sold, sale_date, total_revenue)
+            VALUES (%s, %s, %s, %s, %s);
+        """, (None, None, row['Total Quantity Sold'], row['Sale Date'], row['Total Revenue']))
     
-    print("Total Revenue: {:.2f}\n".format(total_revenue))
+    # Insert into FactSalesByProduct
+    for index, row in sales_by_product.iterrows():
+        cursor.execute("""
+            INSERT INTO FactSalesByProduct (product_id, total_quantity_sold, total_revenue, report_date)
+            VALUES ((SELECT product_id FROM products WHERE product_name = %s), %s, %s, CURRENT_DATE);
+        """, (row['Product Name'], row['Total Quantity Sold'], row['Total Revenue']))
     
-    # Sales by product
-    sales_by_product = data.groupby('product_name').agg({'quantity_sold': 'sum', 'total_revenue': 'sum'}).reset_index()
-    sales_by_product.columns = ['Product Name', 'Total Quantity Sold', 'Total Revenue']
-    print("Sales by Product:")
-    print(sales_by_product.sort_values(by='Total Revenue', ascending=False), end="\n\n")
+    # Insert into FactSalesByStore
+    for index, row in sales_by_store.iterrows():
+        cursor.execute("""
+            INSERT INTO FactSalesByStore (store_name, total_quantity_sold, total_revenue, report_date)
+            VALUES (%s, %s, %s, CURRENT_DATE);
+        """, (row['Store Name'], row['Total Quantity Sold'], row['Total Revenue']))
+
+    # Insert into FactSalesByDate
+    for index, row in sales_by_day.iterrows():
+        cursor.execute("""
+            INSERT INTO FactSalesByDate (sale_date, total_quantity_sold, total_revenue)
+            VALUES (%s, %s, %s);
+        """, (row['Sale Date'], row['Total Quantity Sold'], row['Total Revenue']))
+
+    # Insert into FactSalesByMonth
+    for index, row in sales_by_month.iterrows():
+        cursor.execute("""
+            INSERT INTO FactSalesByMonth (month, total_quantity_sold, total_revenue)
+            VALUES (%s, %s, %s);
+        """, (str(row['Sale Month']), row['Total Quantity Sold'], row['Total Revenue']))
+
+    # Insert into FactSalesByYear
+    for index, row in sales_by_year.iterrows():
+        cursor.execute("""
+            INSERT INTO FactSalesByYear (year, total_quantity_sold, total_revenue)
+            VALUES (%s, %s, %s);
+        """, (int(row['Sale Year'].year), row['Total Quantity Sold'], row['Total Revenue']))
+
+    # Insert into FactSalesByCategory
+    for index, row in sales_by_category.iterrows():
+        cursor.execute("""
+            INSERT INTO FactSalesByCategory (category, total_quantity_sold, total_revenue)
+            VALUES (%s, %s, %s);
+        """, (row['Category'], row['Total Quantity Sold'], row['Total Revenue']))
+
+    # Insert into FactSalesByDayOfWeek
+    for index, row in sales_by_day_of_week.iterrows():
+        cursor.execute("""
+            INSERT INTO FactSalesByDayOfWeek (day_of_week, total_quantity_sold, total_revenue)
+            VALUES (%s, %s, %s);
+        """, (row['Day of Week'], row['Total Quantity Sold'], row['Total Revenue']))
+
+    # Commit the transaction
+    conn.commit()
     
-    # Sales by store
-    sales_by_store = data.groupby('store_name').agg({'quantity_sold': 'sum', 'total_revenue': 'sum'}).reset_index()
-    sales_by_store.columns = ['Store Name', 'Total Quantity Sold', 'Total Revenue']
-    print("Sales by Store:")
-    print(sales_by_store.sort_values(by='Total Revenue', ascending=False), end="\n\n")
-    
-    # Sales by day
-    data['sale_date'] = pd.to_datetime(data['sale_date'])
-    sales_by_day = data.groupby(data['sale_date'].dt.date).agg({'quantity_sold': 'sum', 'total_revenue': 'sum'}).reset_index()
-    sales_by_day.columns = ['Sale Date', 'Total Quantity Sold', 'Total Revenue']
-    print("Sales by Day:")
-    print(sales_by_day.sort_values(by='Sale Date'), end="\n\n")
-
-    # Sales by month
-    sales_by_month = data.groupby(data['sale_date'].dt.to_period('M')).agg({'quantity_sold': 'sum', 'total_revenue': 'sum'}).reset_index()
-    sales_by_month.columns = ['Sale Month', 'Total Quantity Sold', 'Total Revenue']
-    print("Sales by Month:")
-    print(sales_by_month.sort_values(by='Sale Month'), end="\n\n")
-
-    # Sales by year
-    sales_by_year = data.groupby(data['sale_date'].dt.to_period('Y')).agg({'quantity_sold': 'sum', 'total_revenue': 'sum'}).reset_index()
-    sales_by_year.columns = ['Sale Year', 'Total Quantity Sold', 'Total Revenue']
-    print("Sales by Year:")
-    print(sales_by_year.sort_values(by='Sale Year'), end="\n\n")
-
-    # Average price
-    average_price = data['price'].mean()
-    print(f"Average Price: {average_price:.2f}\n")
-
-    # Sales by category
-    sales_by_category = data.groupby('category').agg({'quantity_sold': 'sum', 'total_revenue': 'sum'}).reset_index()
-    sales_by_category.columns = ['Category', 'Total Quantity Sold', 'Total Revenue']
-    print("Sales by Category:")
-    print(sales_by_category.sort_values(by='Total Revenue', ascending=False), end="\n\n")
-
-    # Sales count by category
-    sales_count_by_category = data.groupby('category').size().reset_index(name='Sales Count')
-    print("Sales Count by Category:")
-    print(sales_count_by_category.sort_values(by='Sales Count', ascending=False), end="\n\n")
-
-    # Percentage by category
-    percentage_by_category = sales_by_category.copy()
-    percentage_by_category['Percentage'] = (percentage_by_category['Total Revenue'] / total_revenue) * 100
-    print("Percentage of Revenue by Category:")
-    print(percentage_by_category[['Category', 'Percentage']], end="\n\n")
-
-    # Sales by day of the week
-    data['day_of_week'] = data['sale_date'].dt.day_name()
-    sales_by_day_of_week = data.groupby('day_of_week').agg({'quantity_sold': 'sum', 'total_revenue': 'sum'}).reset_index()
-    sales_by_day_of_week.columns = ['Day of Week', 'Total Quantity Sold', 'Total Revenue']
-    print("Sales by Day of Week:")
-    print(sales_by_day_of_week.sort_values(by='Total Quantity Sold', ascending=False), end="\n\n")
-
+    cursor.close()
+    print("Aggregated data inserted into fact tables successfully!\n")
 
