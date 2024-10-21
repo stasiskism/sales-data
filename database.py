@@ -1,6 +1,4 @@
 import psycopg2
-import pandas as pd
-
 def database_connection():
     try:
         conn = psycopg2.connect(
@@ -23,8 +21,6 @@ def create_tables(conn):
     cursor.execute("DROP TABLE IF EXISTS products CASCADE;")
     cursor.execute("DROP TABLE IF EXISTS stores CASCADE;")
     cursor.execute("DROP TABLE IF EXISTS time CASCADE;")
-    cursor.execute("DROP TABLE IF EXISTS sales_transactions CASCADE;")
-    cursor.execute("DROP TABLE IF EXISTS FactSalesTransactions CASCADE;")
     cursor.execute("DROP TABLE IF EXISTS FactSalesByProduct CASCADE;")
     cursor.execute("DROP TABLE IF EXISTS FactSalesByStore CASCADE;")
     cursor.execute("DROP TABLE IF EXISTS FactSalesByDate CASCADE;")
@@ -65,29 +61,6 @@ def create_tables(conn):
     );
     """
     )
-
-    cursor.execute("""
-    CREATE TABLE sales_transactions (
-        transaction_id SERIAL PRIMARY KEY,
-        product_id INT REFERENCES products(product_id),
-        store_id INT REFERENCES stores(store_id),
-        quantity_sold INT,
-        sale_date DATE,
-        revenue DECIMAL
-    );
-    """
-    )
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS FactSalesTransactions (
-            transaction_id SERIAL PRIMARY KEY,
-            product_id INT REFERENCES products(product_id),
-            store_id INT REFERENCES stores(store_id),
-            quantity_sold INT,
-            sale_date DATE,
-            total_revenue DECIMAL
-        );
-    """)
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS FactSalesByProduct (
@@ -178,15 +151,8 @@ def insert_dim_data(data, conn):
 
 
 def insert_fact_data(sales_by_product, sales_by_store, sales_by_day, sales_by_month, sales_by_year, sales_by_category, sales_by_day_of_week, conn):
-    cursor = conn.cursor()
+    cursor = conn.cursor()   
 
-    # Insert into FactSalesTransactions
-    for index, row in sales_by_day.iterrows():
-        cursor.execute("""
-            INSERT INTO FactSalesTransactions (store_id, product_id, quantity_sold, sale_date, total_revenue)
-            VALUES (%s, %s, %s, %s, %s);
-        """, (None, None, row['Total Quantity Sold'], row['Sale Date'], row['Total Revenue']))
-    
     # Insert into FactSalesByProduct
     for index, row in sales_by_product.iterrows():
         cursor.execute("""
